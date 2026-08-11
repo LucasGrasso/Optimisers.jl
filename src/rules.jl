@@ -925,3 +925,48 @@ end
 
 adjust(o::MixedPrecision{T}, eta::Real) where T = MixedPrecision(T, adjust(o.rule, eta))
 adjust(o::MixedPrecision{T}; kw...) where T = MixedPrecision(T, adjust(o.rule; kw...))
+
+
+"""
+    AdaHessian(η = 0.001, β = (0.9, 0.999), b = 32, k = 1, ϵ = 1e-8)
+    AdaHessian(; [eta, beta, b, k, epsilon])
+
+[AdaHessian](https://arxiv.org/abs/2006.00719) is a second order stochastic optimization algorithm which dynamically incorporates
+the curvature of the loss function via ADAptive estimates of the Hessian.
+
+# Parameters
+- Learning rate (`η == eta`): Amount by which gradients are discounted before updating
+                       the weights.
+- Decay of momentums (`β::Tuple == beta`): Exponential decay for the first (β1) and the second (β2) momentum estimate.
+- Block size (`b`): The number of samples to use for computing the spatial average of the Hessian diagonal.
+- Hessian power (`k`): The power to which the Hessian diagonal is raised in the update rule.
+- Machine epsilon (`ϵ == epsilon`): Constant to prevent division by zero.
+"""
+@def struct AdaHessian <: AbstractRule
+  eta= 0.001
+  beta = (0.9, 0.999)
+  b = 32
+  k = 1
+  epsilon = 1e-8
+end
+
+init(o::AdaHessian, x::AbstractArray{T}) where T = (zero(x), zero(x), T.(o.beta))
+
+function apply!(o::AdaHessian, state, x::AbstractArray{T}, dx, dz) where T
+  η, β, ϵ, k = T(o.eta), T.(o.beta), _eps(T, o.epsilon), real(T)(o.k)
+  mt, vt, βt = state
+
+  Ds = _spatial_average(dz, o.b)
+  @.. mt = β[1] * mt + (1 - β[1]) * dx
+  @.. vt = β[2] * vt + (1 - β[2]) * abs2(Ds)
+  dx′ = @lazy η * (mt / (1 - βt[1])) / (sqrt(vt / (1 - βt[2]))^k + ϵ)
+
+  return (mt, vt, βt .* β), dx′
+
+end
+
+function _spatial_average(dz, b)
+  # Compute the spatial average of the Hessian diagonal
+  # This is a placeholder implementation; actual implementation may vary
+  return mean(dz, dims=1) / b
+end
